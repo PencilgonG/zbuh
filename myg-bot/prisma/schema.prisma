@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model UserProfile {
+  id            String   @id @default(cuid())
+  discordId     String   @unique
+  username      String
+  lolName       String
+  mainRole      String
+  secondaryRole String?
+  elo           String
+  opggLink      String?
+  dpmLink       String?
+  points        Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  matches Match[] @relation("PlayerMatches")
+  votes   Vote[]  @relation("PlayerVotes")
+}
+
+model Lobby {
+  id        String   @id @default(cuid())
+  guildId   String
+  name      String
+  mode      String
+  teamCount Int
+  status    String   @default("WAITING")
+  createdBy String
+  createdAt DateTime @default(now())
+
+  matches Match[] @relation("LobbyMatches")
+}
+
+model Match {
+  id        String   @id @default(cuid())
+  lobbyId   String
+  teamA     String
+  teamB     String
+  winner    String?
+  format    String
+  createdAt DateTime @default(now())
+
+  lobby   Lobby         @relation("LobbyMatches", fields: [lobbyId], references: [id])
+  players UserProfile[] @relation("PlayerMatches")
+  votes   Vote[]        @relation("MatchVotes")
+}
+
+model Vote {
+  id        String   @id @default(cuid())
+  matchId   String
+  voterId   String
+  votedId   String
+  createdAt DateTime @default(now())
+
+  match Match       @relation("MatchVotes", fields: [matchId], references: [id])
+  voter UserProfile @relation("PlayerVotes", fields: [voterId], references: [id])
+}
