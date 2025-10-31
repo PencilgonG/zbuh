@@ -10,7 +10,9 @@
     "register:guild": "tsx scripts/register-commands.ts --scope guild",
     "register:global": "tsx scripts/register-commands.ts --scope global",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+
+    "release": "bash -c 'TS=$(date +%Y%m%d_%H%M) && cd /workspaces/zbuh/myg-bot && zip -r ../myg-bot_$TS.zip . -x \"node_modules/*\" \".git/*\" \".vscode/*\" \"dist/*\" \"**/*.log\" && git add -A && git commit -m \"release: MYG bot stable build ($TS)\" && TAG=v$(date +%Y.%m.%d-%H%M) && git tag -a $TAG -m \"MYG bot release $TAG\" && git push origin main && git push origin --tags && echo \"✅ Release pushed and archived as ../myg-bot_$TS.zip\"'"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
