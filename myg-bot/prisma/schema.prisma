@@ -7,57 +7,179 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model UserProfile {
-  id            String   @id @default(cuid())
-  discordId     String   @unique
-  username      String
-  lolName       String
-  mainRole      String
-  secondaryRole String?
-  elo           String
-  opggLink      String?
-  dpmLink       String?
-  points        Int      @default(0)
-  createdAt     DateTime @default(now())
+enum Elo {
+  IRON
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  EMERALD
+  DIAMOND
+  MASTER
+  GRANDMASTER
+  CHALLENGER
+}
 
-  matches Match[] @relation("PlayerMatches")
-  votes   Vote[]  @relation("PlayerVotes")
+enum Role {
+  TOP
+  JGL
+  MID
+  ADC
+  SUPP
+  SUB
+}
+
+enum LobbyStatus {
+  WAITING
+  BUILDER
+  CLOSED
+}
+
+enum MatchState {
+  PENDING
+  RUNNING
+  FINISHED
+  CANCELLED
+}
+
+enum LobbyFormat {
+  BO1
+  BO3
+  BO5
+  RR1
+  RR2
+  RR3
+}
+
+model UserProfile {
+  discordId     String   @id
+  summonerName  String?
+  elo           Elo?
+  mainRole      Role?
+  secondaryRole Role?
+  opggUrl       String?
+  dpmUrl        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model Lobby {
-  id        String   @id @default(cuid())
+  id        String      @id @default(cuid())
   guildId   String
+  channelId String
+  messageId String
   name      String
-  mode      String
-  teamCount Int
-  status    String   @default("WAITING")
+  teams     Int
+  status    LobbyStatus @default(WAITING)
   createdBy String
-  createdAt DateTime @default(now())
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  format    LobbyFormat?
 
-  matches Match[] @relation("LobbyMatches")
+  participants LobbyParticipant[]
+  teamsList    Team[]
+  matches      Match[]
+}
+
+model LobbyParticipant {
+  id        String   @id @default(cuid())
+  lobbyId   String
+  discordId String?
+  display   String
+  role      Role
+  isFake    Boolean  @default(false)
+  joinedAt  DateTime @default(now())
+
+  lobby      Lobby       @relation(fields: [lobbyId], references: [id])
+  teamMember TeamMember?
+
+  @@unique([lobbyId, discordId])
+  @@index([lobbyId, role])
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  lobbyId   String
+  name      String
+  captainId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lobby   Lobby        @relation(fields: [lobbyId], references: [id])
+  members TeamMember[]
+
+  matchesAsA Match[] @relation("TeamA")
+  matchesAsB Match[] @relation("TeamB")
+  winnersOf  Match[] @relation("WinnerTeam")
+}
+
+model TeamMember {
+  id                 String   @id @default(cuid())
+  teamId             String
+  lobbyParticipantId String   @unique
+  assignedAt         DateTime @default(now())
+
+  team        Team             @relation(fields: [teamId], references: [id])
+  participant LobbyParticipant @relation(fields: [lobbyParticipantId], references: [id])
+
+  @@unique([teamId, lobbyParticipantId])
 }
 
 model Match {
-  id        String   @id @default(cuid())
-  lobbyId   String
-  teamA     String
-  teamB     String
-  winner    String?
-  format    String
-  createdAt DateTime @default(now())
+  id           String     @id @default(cuid())
+  lobbyId      String
+  teamAId      String
+  teamBId      String
+  round        Int
+  state        MatchState @default(PENDING)
+  draftRoomId  String?
+  blueUrl      String?
+  redUrl       String?
+  specUrl      String?
+  winnerTeamId String?
+  winner       Team?      @relation("WinnerTeam", fields: [winnerTeamId], references: [id])
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
-  lobby   Lobby         @relation("LobbyMatches", fields: [lobbyId], references: [id])
-  players UserProfile[] @relation("PlayerMatches")
-  votes   Vote[]        @relation("MatchVotes")
+  lobby  Lobby @relation(fields: [lobbyId], references: [id])
+  teamA  Team  @relation("TeamA", fields: [teamAId], references: [id])
+  teamB  Team  @relation("TeamB", fields: [teamBId], references: [id])
+  result MatchResult?
+
+  @@index([lobbyId, round])
 }
 
-model Vote {
+model MvpVote {
+  id             String   @id @default(cuid())
+  lobbyId        String
+  matchId        String
+  teamId         String
+  voterDiscordId String
+  votedDiscordId String
+  createdAt      DateTime @default(now())
+
+  @@unique([matchId, teamId, voterDiscordId])
+  @@index([lobbyId])
+}
+
+model PointsLedger {
   id        String   @id @default(cuid())
+  discordId String
   matchId   String
-  voterId   String
-  votedId   String
+  points    Int
+  reason    String
   createdAt DateTime @default(now())
 
-  match Match       @relation("MatchVotes", fields: [matchId], references: [id])
-  voter UserProfile @relation("PlayerVotes", fields: [voterId], references: [id])
+  @@index([discordId])
+  @@index([matchId])
+}
+
+model MatchResult {
+  id        String   @id @default(cuid())
+  matchId   String   @unique
+  winnerId  String
+  loserId   String
+  createdAt DateTime @default(now())
+
+  match Match @relation(fields: [matchId], references: [id])
 }

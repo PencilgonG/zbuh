@@ -1,79 +1,78 @@
-// src/index.ts
-import "dotenv/config";
 import {
   Client,
-  Events,
   GatewayIntentBits,
-  Partials,
   Interaction,
+  ButtonInteraction,
+  StringSelectMenuInteraction,
+  ModalSubmitInteraction,
 } from "discord.js";
+import { env } from "./env";
+import { log } from "./log";
+import { handleSlash } from "./interactions/dispatcher";
+import { handleLobbyButton } from "./lobby/buttons";
+import { handleTeamSelectMenu, handleTeamModal } from "./team/menus";
+import { handleTeamButton } from "./team/buttons";
+import { handleMatchButton } from "./match/buttons";
+import { handleResultButton } from "./results/buttons";
+import { handleMvpSelect, handleMvpLock } from "./vote/handlers";
 
-import { handleAny } from "./bot/interactions/dispatcher.js";
-import { prisma } from "./db.js";
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-// --- Client Discord ---
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds, // requis pour les slash + interactions
-  ],
-  partials: [Partials.Channel],
+client.once("ready", () => {
+  log.info({ user: client.user?.tag }, "Bot prêt ✅");
 });
 
-// --- Ready (nouveau nom: clientReady) ---
-client.once(Events.ClientReady, async (c) => {
-  console.info(`✅ Connecté en tant que ${c.user.tag}`);
-
-  // Prisma connect
+client.on("interactionCreate", async (interaction: Interaction) => {
   try {
-    await prisma.$connect();
-    console.info("✅ Connecté à Neon DB via Prisma");
-  } catch (e) {
-    console.error("❌ Prisma connection error:", e);
-  }
-});
+    if (interaction.isChatInputCommand()) {
+      return await handleSlash(interaction);
+    }
 
-// --- Interactions (slash / boutons / selects / modals) ---
-client.on(Events.InteractionCreate, async (interaction: Interaction) => {
-  try {
-    await handleAny(interaction);
-  } catch (e) {
-    console.error("❌ Erreur interaction:", e);
-    // Evite "Unknown interaction" si l'interaction a déjà été acquittée
-    try {
-      if ("deferred" in interaction && (interaction as any).deferred) {
-        await (interaction as any).followUp({
-          content: "⚠️ Erreur interne.",
-          ephemeral: true,
-        });
-      } else if ("replied" in interaction && (interaction as any).replied) {
-        await (interaction as any).followUp({
-          content: "⚠️ Erreur interne.",
-          ephemeral: true,
-        });
-      } else if ("reply" in interaction) {
-        await (interaction as any).reply({
-          content: "⚠️ Erreur interne.",
-          ephemeral: true,
-        });
+    if (interaction.isButton()) {
+      const btn = interaction as ButtonInteraction;
+      const id = btn.customId;
+
+      // Priorité par préfixes
+      if (id.startsWith("RESULT:")) return await handleResultButton(btn);
+      if (id.startsWith("MATCH:")) return await handleMatchButton(btn);
+      if (id.startsWith("TB:")) return await handleTeamButton(btn);
+
+      // 🔒 MVP/VOTE — boutons (ex: VOTE:LOCK:<lobbyId>)
+      if (id.startsWith("VOTE:LOCK:") || id.startsWith("MVP:LOCK:")) {
+        return await handleMvpLock(btn);
       }
-    } catch {
-      // Interaction expirée -> on ignore pour éviter un crash
+
+      // Fallback: boutons de lobby
+      return await handleLobbyButton(btn);
+    }
+
+    if (interaction.isStringSelectMenu()) {
+      const sel = interaction as StringSelectMenuInteraction;
+      const id = sel.customId;
+
+      // MVP — sélecteurs (ex: VOTE:MVP:<lobbyId>:<teamId>)
+      if (id.startsWith("VOTE:MVP:") || id.startsWith("MVP:")) {
+        return await handleMvpSelect(sel);
+      }
+
+      // Team Builder
+      return await handleTeamSelectMenu(sel);
+    }
+
+    if (interaction.isModalSubmit()) {
+      return await handleTeamModal(interaction as ModalSubmitInteraction);
+    }
+  } catch (err) {
+    log.error({ err }, "Erreur interaction");
+    if (interaction.isRepliable()) {
+      const msg = "❌ Une erreur est survenue. Réessaie.";
+      if (interaction.deferred || interaction.replied) {
+        await interaction.followUp({ content: msg, ephemeral: true });
+      } else {
+        await interaction.reply({ content: msg, ephemeral: true });
+      }
     }
   }
 });
 
-// --- Sécurité process ---
-process.on("unhandledRejection", (reason) => {
-  console.error("UnhandledRejection:", reason);
-});
-process.on("uncaughtException", (err) => {
-  console.error("UncaughtException:", err);
-});
-
-// --- Login ---
-const token = process.env.DISCORD_TOKEN;
-if (!token) {
-  console.error("❌ DISCORD_TOKEN manquant dans .env");
-  process.exit(1);
-}
-client.login(token);
+client.login(env.DISCORD_TOKEN);
