@@ -4,9 +4,10 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url      = env("DATABASE_URL") // ex: ...neon.tech/neondb?sslmode=require&schema=myg
 }
 
+// ===== Enums partagés =====
 enum Elo {
   IRON
   BRONZE
@@ -51,6 +52,7 @@ enum LobbyFormat {
   RR3
 }
 
+// ===== Modèles partagés bot/site =====
 model UserProfile {
   discordId     String   @id
   summonerName  String?
@@ -132,21 +134,39 @@ model Match {
   teamBId      String
   round        Int
   state        MatchState @default(PENDING)
+
   draftRoomId  String?
   blueUrl      String?
   redUrl       String?
   specUrl      String?
+
+  announcedAt  DateTime?  // idempotence guard
+
   winnerTeamId String?
   winner       Team?      @relation("WinnerTeam", fields: [winnerTeamId], references: [id])
+
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   lobby  Lobby @relation(fields: [lobbyId], references: [id])
   teamA  Team  @relation("TeamA", fields: [teamAId], references: [id])
   teamB  Team  @relation("TeamB", fields: [teamBId], references: [id])
+
   result MatchResult?
 
   @@index([lobbyId, round])
+  @@index([lobbyId, round, state])
+  @@unique([lobbyId, round, teamAId, teamBId])
+}
+
+model MatchResult {
+  id        String   @id @default(cuid())
+  matchId   String   @unique
+  winnerId  String
+  loserId   String
+  createdAt DateTime @default(now())
+
+  match Match @relation(fields: [matchId], references: [id])
 }
 
 model MvpVote {
@@ -174,12 +194,26 @@ model PointsLedger {
   @@index([matchId])
 }
 
-model MatchResult {
+// ===== Modèles "site" (peuvent rester ici sans gêner le bot)
+model FaqItem {
   id        String   @id @default(cuid())
-  matchId   String   @unique
-  winnerId  String
-  loserId   String
+  order     Int      @default(0)
+  question  String
+  answer    String
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
 
-  match Match @relation(fields: [matchId], references: [id])
+model InhouseEvent {
+  id          String   @id @default(cuid())
+  title       String
+  startAt     DateTime
+  mode        String?
+  maxPlayers  Int?
+  description String?
+  isOpen      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([startAt])
 }

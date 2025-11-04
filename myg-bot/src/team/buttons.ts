@@ -1,3 +1,4 @@
+// src/team/buttons.ts
 import {
   ButtonInteraction,
   StringSelectMenuBuilder,
@@ -16,7 +17,7 @@ import {
 import { generateSchedule } from "./schedule";
 import { sendLineup } from "./lineup";
 import { createTeamCategories } from "./channels";
-import { startRound } from "../match/flow"; // 👈 NEW
+import { startRound } from "../match/flow";
 
 function isRespoOrCreator(member: GuildMember | null, lobbyCreatorId: string): boolean {
   if (!member) return false;
@@ -131,8 +132,10 @@ export async function handleTeamButton(inter: ButtonInteraction) {
     }
 
     // Check équipes complètes
-    const roles = ["TOP", "JGL", "MID", "ADC", "SUPP"];
-    const incomplete = lobby.teamsList.find(t => roles.some(r => !t.members.find(m => m.participant.role === r)));
+    const roles = ["TOP", "JGL", "MID", "ADC", "SUPP"] as const;
+    const incomplete = lobby.teamsList.find(t =>
+      roles.some(r => !t.members.find(m => m.participant.role === r))
+    );
     if (incomplete) {
       await inter.followUp({ content: `❌ ${incomplete.name} est incomplète. Remplis tous les rôles.`, ephemeral: true });
       return;
@@ -145,8 +148,14 @@ export async function handleTeamButton(inter: ButtonInteraction) {
       return;
     }
 
-    // Génère planning (par défaut: 2 équipes → BO1 ; 4 équipes → RR1)
-    const schedule = generateSchedule(lobby.teamsList, lobby.teams === 2 ? "BO1" : "RR1");
+    // ✅ Génère le planning en respectant le format choisi
+    // Fallback si non défini : 2 équipes -> BO1 ; 4 équipes -> RR1
+    const fmt = (lobby.format as any) ?? (lobby.teams === 2 ? "BO1" : "RR1");
+    const schedule = generateSchedule(
+      lobby.teamsList.map(t => ({ id: t.id, name: t.name })), // TeamLike
+      fmt
+    );
+
     for (const m of schedule) {
       await prisma.match.create({
         data: {

@@ -1,31 +1,32 @@
 {
   "name": "myg-bot",
   "version": "1.0.0",
-  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "npm run build && node dist/index.js",
-    "register:guild": "tsx scripts/register-commands.ts --scope guild",
-    "register:global": "tsx scripts/register-commands.ts --scope global",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
 
-    "release": "bash -c 'TS=$(date +%Y%m%d_%H%M) && cd /workspaces/zbuh/myg-bot && zip -r ../myg-bot_$TS.zip . -x \"node_modules/*\" \".git/*\" \".vscode/*\" \"dist/*\" \"**/*.log\" && git add -A && git commit -m \"release: MYG bot stable build ($TS)\" && TAG=v$(date +%Y.%m.%d-%H%M) && git tag -a $TAG -m \"MYG bot release $TAG\" && git push origin main && git push origin --tags && echo \"✅ Release pushed and archived as ../myg-bot_$TS.zip\"'"
+    "// deploy": "----------- Commandes de déploiement Discord -----------",
+    "register:guild": "tsx -r dotenv/config scripts/register-commands.ts --scope guild",
+    "register:global": "tsx -r dotenv/config scripts/register-commands.ts --scope global",
+
+    "// prisma": "----------- Gestion base de données -----------",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
     "discord.js": "^14.15.3",
-    "dotenv": "^16.4.5",
+    "dotenv": "^17.2.1",
     "pino": "^9.9.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/node": "^22.8.1",
-    "pino-pretty": "^13.1.2",
+    "@types/node": "^24.9.1",
     "prisma": "^5.22.0",
     "tsx": "^4.19.1",
-    "typescript": "^5.6.3"
-  }
+    "typescript": "^5.9.3"
+  },
+  "type": "module"
 }
