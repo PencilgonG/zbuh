@@ -2,3 +2,7 @@
 # Monorepo ignores
 myg-site/node_modules/
 myg-site/.next/
+
+# Ignore secrets
+*.env
+**/.env
