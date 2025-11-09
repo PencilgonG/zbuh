@@ -1,5 +1,6 @@
-import { ButtonInteraction, GuildMember, ActionRowBuilder } from "discord.js";
-import { prisma } from "../prisma";
+// src/lobby/buttons.ts
+import { ButtonInteraction, GuildMember } from "discord.js";
+import { prisma } from "../prismat";
 import { env } from "../env";
 import { parseLobbyCustomId } from "./ids";
 import { roleCap } from "./state";
@@ -56,13 +57,11 @@ export async function handleLobbyButton(interaction: ButtonInteraction) {
         },
       });
     });
-
   } else if (parsed.kind === "QUIT") {
     const userId = interaction.user.id;
     await prisma.lobbyParticipant.deleteMany({
       where: { lobbyId: lobby.id, discordId: userId },
     });
-
   } else if (parsed.kind === "TEST") {
     // Only creator or respo
     const allowed = interaction.user.id === lobby.createdBy || hasRespoRole(interaction);
@@ -71,7 +70,9 @@ export async function handleLobbyButton(interaction: ButtonInteraction) {
     const roles: Array<"TOP" | "JGL" | "MID" | "ADC" | "SUPP"> = ["TOP", "JGL", "MID", "ADC", "SUPP"];
     for (const r of roles) {
       const cap = roleCap(lobby.teams, r);
-      const current = await prisma.lobbyParticipant.count({ where: { lobbyId: lobby.id, role: r } });
+      const current = await prisma.lobbyParticipant.count({
+        where: { lobbyId: lobby.id, role: r },
+      });
       const missing = Math.max(0, cap - current);
       if (missing > 0) {
         await prisma.lobbyParticipant.createMany({
@@ -85,7 +86,6 @@ export async function handleLobbyButton(interaction: ButtonInteraction) {
         });
       }
     }
-
   } else if (parsed.kind === "VALIDATE") {
     // respo only
     if (!hasRespoRole(interaction)) return;
@@ -102,12 +102,14 @@ export async function handleLobbyButton(interaction: ButtonInteraction) {
 
     // Lancer le Team Builder
     const { launchTeamBuilder } = await import("../team/builder.js");
-    // @ts-expect-error: on réutilise ButtonInteraction comme ChatInput pour followUp
-    await launchTeamBuilder(lobby.id, interaction as any);
+    await (launchTeamBuilder as any)(lobby.id, interaction as any);
     return;
   }
 
-  // Rafraîchir l'embed après action
+  // Rafraîchir l'embed après action (nouvelle signature: 1 seul argument)
   const view = await renderLobbyMessage(lobby.id);
-  await interaction.message.edit({ embeds: [view.embed], components: [view.rows[0], view.rows[1]] });
+  await interaction.message.edit({
+    embeds: [view.embed],
+    components: [view.rows[0], view.rows[1]],
+  });
 }

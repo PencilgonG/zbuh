@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "ConsumableType" ADD VALUE 'DOUBLE_POINTS_TOKEN';

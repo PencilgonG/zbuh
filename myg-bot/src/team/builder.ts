@@ -1,38 +1,54 @@
 import { ChatInputCommandInteraction, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
-import { prisma } from "../prisma";
+import { prisma } from "../prismat";
 import { mygEmbedBase } from "../utils/embeds";
 
 export async function launchTeamBuilder(lobbyId: string, interaction: ChatInputCommandInteraction) {
   const lobby = await prisma.lobby.findUnique({
     where: { id: lobbyId },
-    include: { participants: true }
+    include: { participants: true },
   });
   if (!lobby) return interaction.followUp({ content: "Lobby introuvable.", ephemeral: true });
+
+  // ❌ Pas de Team Builder en Battle Royale
+  if ((lobby as any).mode === "BATTLE_ROYALE") {
+    return interaction.followUp({
+      content: "Le mode **Battle Royale** n’utilise pas le Team Builder (pas d’équipes).",
+      ephemeral: true,
+    });
+  }
+
+  // Sécurité : si quelqu’un crée un lobby avec teams=0 (erreur), on stoppe
+  if (!lobby.teams || lobby.teams < 2) {
+    return interaction.followUp({
+      content: "Configuration invalide : ce lobby n’a pas d’équipes.",
+      ephemeral: true,
+    });
+  }
 
   // Créer les entités Team de base selon lobby.teams
   const createdTeams = await Promise.all(
     Array.from({ length: lobby.teams }, (_, i) =>
-      prisma.team.create({ data: { lobbyId: lobby.id, name: `Team ${i + 1}` } })
-    )
+      prisma.team.create({ data: { lobbyId: lobby.id, name: `Team ${i + 1}` } }),
+    ),
   );
 
   const embed = new EmbedBuilder(
     mygEmbedBase({
       title: `Team Builder — ${lobby.name}`,
       description: `Compose les équipes à partir des joueurs inscrits ci-dessous.\n**${lobby.teams} équipes** à créer.`,
-      footer: { text: "Seul le rôle Respo peut modifier cette section." }
-    })
+      footer: { text: "Seul le rôle Respo peut modifier cette section." },
+    }),
   );
 
   const menuTeam = new StringSelectMenuBuilder()
     .setCustomId(`TB:TEAM:${lobby.id}`)
     .setPlaceholder("Choisir une équipe")
-    .addOptions(createdTeams.map(t => ({ label: t.name, value: t.id })));
+    .addOptions(createdTeams.map((t) => ({ label: t.name, value: t.id })));
 
   const menuRole = new StringSelectMenuBuilder()
     .setCustomId(`TB:ROLE:${lobby.id}`)
     .setPlaceholder("Choisir un rôle")
-    .addOptions(["TOP","JGL","MID","ADC","SUPP"].map(r => ({ label: r, value: r })));
+    .addOptions(["TOP", "JGL", "MID", "ADC", "SUPP"].map((r) => ({ label: r, value: r })));
 
   const btnName = new ButtonBuilder().setCustomId(`TB:NAME:${lobby.id}`).setLabel("Renommer").setStyle(ButtonStyle.Secondary);
   const btnCaptain = new ButtonBuilder().setCustomId(`TB:CAPTAIN:${lobby.id}`).setLabel("Capitaine").setStyle(ButtonStyle.Secondary);

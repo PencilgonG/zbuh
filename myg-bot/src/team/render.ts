@@ -5,7 +5,7 @@ import {
   EmbedBuilder,
   StringSelectMenuBuilder,
 } from "discord.js";
-import { prisma } from "../prisma";
+import { prisma } from "../prismat";
 import { mygEmbedBase } from "../utils/embeds";
 import {
   tbTeamSelectId,
@@ -27,43 +27,78 @@ export async function renderTeamBuilder(lobbyId: string, selectedTeamId?: string
   });
   if (!lobby) throw new Error("Lobby introuvable");
 
+  // --- Map des titres actifs (discordId -> Title.name)
+  const allDiscordIds = new Set<string>();
+  for (const p of lobby.participants) if (p.discordId) allDiscordIds.add(p.discordId);
+  for (const t of lobby.teamsList) {
+    for (const m of t.members) if (m.participant.discordId) allDiscordIds.add(m.participant.discordId);
+  }
+  const ids = Array.from(allDiscordIds);
+  const profiles =
+    ids.length > 0
+      ? await prisma.userProfile.findMany({
+          where: { discordId: { in: ids } },
+          include: { activeTitle: true },
+        })
+      : [];
+  const titleById = new Map<string, string>();
+  for (const prof of profiles) {
+    if (prof.discordId && prof.activeTitle?.name) {
+      titleById.set(prof.discordId, prof.activeTitle.name);
+    }
+  }
+
+  const withTitle = (display: string, discordId: string | null) => {
+    if (!discordId) return display;
+    const t = titleById.get(discordId);
+    return t ? `${display} [*${t}*]` : display;
+  };
+
   const teams = lobby.teamsList;
   const activeTeamId = selectedTeamId ?? teams[0]?.id ?? "";
 
   const assignedIds = new Set(teams.flatMap((t) => t.members.map((m) => m.lobbyParticipantId)));
+
   const poolByRole = (role: string) =>
-    lobby.participants.filter((p) => p.role === role && !assignedIds.has(p.id)).map((p) => p.display);
+    lobby.participants
+      .filter((p) => p.role === role && !assignedIds.has(p.id))
+      .map((p) => withTitle(p.display, p.discordId ?? null));
 
   const fmtTeam = (t: (typeof teams)[number]) => {
-    const get = (r: string) => t.members.find((m) => m.participant.role === r)?.participant.display ?? "—";
-    const cap = t.captainId
+    const get = (r: string) => {
+      const m = t.members.find((m) => m.participant.role === r)?.participant;
+      return m ? withTitle(m.display, m.discordId ?? null) : "—";
+    };
+    const capName = t.captainId
       ? t.members.find((m) => m.lobbyParticipantId === t.captainId)?.participant.display
       : undefined;
-    return `**${t.name}**${cap ? ` (👑 ${cap})` : ""}\nTop: ${get("TOP")}\nJgl: ${get("JGL")}\nMid: ${get("MID")}\nAdc: ${get("ADC")}\nSupp: ${get("SUPP")}`;
+    return `**${t.name}**${capName ? ` (👑 ${capName})` : ""}\nTop: ${get("TOP")}\nJgl: ${get(
+      "JGL",
+    )}\nMid: ${get("MID")}\nAdc: ${get("ADC")}\nSupp: ${get("SUPP")}`;
   };
 
   const embed = new EmbedBuilder(
     mygEmbedBase({
       title: `Team Builder — ${lobby.name}`,
       fields: [
-        { name: "Pool Top", value: poolByRole("TOP").join("\n") || "_(vide)_", inline: true },
-        { name: "Pool Jgl", value: poolByRole("JGL").join("\n") || "_(vide)_", inline: true },
-        { name: "Pool Mid", value: poolByRole("MID").join("\n") || "_(vide)_", inline: true },
-        { name: "Pool Adc", value: poolByRole("ADC").join("\n") || "_(vide)_", inline: true },
-        { name: "Pool Supp", value: poolByRole("SUPP").join("\n") || "_(vide)_", inline: true },
+        { name: "Pool Top", value: listOrEmpty(poolByRole("TOP")), inline: true },
+        { name: "Pool Jgl", value: listOrEmpty(poolByRole("JGL")), inline: true },
+        { name: "Pool Mid", value: listOrEmpty(poolByRole("MID")), inline: true },
+        { name: "Pool Adc", value: listOrEmpty(poolByRole("ADC")), inline: true },
+        { name: "Pool Supp", value: listOrEmpty(poolByRole("SUPP")), inline: true },
         {
           name: "Subs",
           value:
             lobby.participants
               .filter((p) => p.role === "SUB" && !assignedIds.has(p.id))
-              .map((p) => p.display)
+              .map((p) => withTitle(p.display, p.discordId ?? null))
               .join("\n") || "_(vide)_",
           inline: true,
         },
         ...teams.map((t) => ({ name: "—", value: fmtTeam(t), inline: false })),
       ],
       footer: { text: "Sélectionne une équipe, un rôle, puis un joueur pour l’assigner." },
-    })
+    }),
   );
 
   const teamMenu = new StringSelectMenuBuilder()
@@ -73,9 +108,7 @@ export async function renderTeamBuilder(lobbyId: string, selectedTeamId?: string
 
   const roleMenu = new StringSelectMenuBuilder()
     .setCustomId(tbRoleSelectId(lobby.id, activeTeamId))
-    .setPlaceholder(
-      `Choisir un rôle — équipe: ${teams.find((t) => t.id === activeTeamId)?.name ?? "?"}`
-    )
+    .setPlaceholder(`Choisir un rôle — équipe: ${teams.find((t) => t.id === activeTeamId)?.name ?? "?"}`)
     .addOptions(["TOP", "JGL", "MID", "ADC", "SUPP"].map((r) => ({ label: r, value: r })));
 
   const row1 = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(teamMenu);
@@ -89,4 +122,8 @@ export async function renderTeamBuilder(lobbyId: string, selectedTeamId?: string
   );
 
   return { embed, components: [row1, row2, buttons] as const, activeTeamId };
+}
+
+function listOrEmpty(arr: string[]) {
+  return arr.length ? arr.join("\n") : "_(vide)_";
 }

@@ -1,3 +1,5 @@
+// prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,7 +9,9 @@ datasource db {
   url      = env("DATABASE_URL") // ex: ...neon.tech/neondb?sslmode=require&schema=myg
 }
 
-// ===== Enums partagés =====
+/**
+ * ===================== Enums partagés =====================
+ */
 enum Elo {
   IRON
   BRONZE
@@ -52,7 +56,78 @@ enum LobbyFormat {
   RR3
 }
 
-// ===== Modèles partagés bot/site =====
+/**
+ * ✅ Nouveau : mode de lobby
+ */
+enum LobbyMode {
+  NORMAL
+  SURPRISE
+  BATTLE_ROYALE
+}
+
+/**
+ * ===================== Nouveaux enums (Shop / Factions / Consommables / AH) =====================
+ */
+enum ShopType {
+  TITLE
+  CONSUMABLE
+  FACTION
+}
+
+enum ConsumableType {
+  BAN_PLUS_ONE
+  DOUBLE_IMPOSTOR_VOTE
+  FACTION_TRANSFER
+  FACTION_CHEST_I
+  TITLE_TOKEN_COMMON
+  TITLE_TOKEN_RARE
+  TITLE_TOKEN_EPIC
+  DOUBLE_POINTS_TOKEN
+}
+
+enum QuotaType {
+  BAN_PLUS_ONE_WEEKLY
+  DOUBLE_IMPOSTOR_VOTE_WEEKLY
+  FACTION_TRANSFER_MONTHLY
+}
+
+enum FactionBadgeType {
+  INSIGNE
+  EMISSAIRE
+}
+
+enum ChallengeStatus {
+  PENDING
+  APPROVED
+  RESOLVED
+}
+
+enum ListingType {
+  TITLE
+  CONSUMABLE
+}
+
+enum ListingStatus {
+  ACTIVE
+  SOLD
+  CANCELLED
+  EXPIRED
+}
+
+/**
+ * ======== Offres de transfert de faction ========
+ */
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+/**
+ * ===================== Modèles partagés bot/site =====================
+ */
 model UserProfile {
   discordId     String   @id
   summonerName  String?
@@ -63,24 +138,48 @@ model UserProfile {
   dpmUrl        String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  // --- Ajouts ---
+  factionId     Int?
+  activeTitleId Int?
+
+  faction     Faction? @relation(fields: [factionId], references: [id])
+  activeTitle Title?   @relation("ActiveTitle", fields: [activeTitleId], references: [id])
+
+  // possessions / effets
+  titles        UserTitle[]
+  consumables   ConsumableStock[]
+  quotas        UserQuota[]
+  purchases     Purchase[]
+  listings      Listing[]         @relation("ListingsBySeller")
+  tradesBought  Trade[]           @relation("TradesByBuyer")
+  factionBadges FactionBadge[]
+  offerings     FactionOffering[]
+
+  // dev/test flags (pour /infinite, /supp)
+  overrides DevOverride?
+
+  @@index([factionId])
 }
 
 model Lobby {
-  id        String      @id @default(cuid())
+  id        String       @id @default(cuid())
   guildId   String
   channelId String
   messageId String
   name      String
   teams     Int
-  status    LobbyStatus @default(WAITING)
+  status    LobbyStatus  @default(WAITING)
   createdBy String
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
   format    LobbyFormat?
+  mode      LobbyMode    @default(NORMAL)
 
-  participants LobbyParticipant[]
-  teamsList    Team[]
-  matches      Match[]
+  participants  LobbyParticipant[]
+  teamsList     Team[]
+  matches       Match[]
+  battleMatches BattleMatch[]
 }
 
 model LobbyParticipant {
@@ -128,35 +227,35 @@ model TeamMember {
 }
 
 model Match {
-  id           String     @id @default(cuid())
-  lobbyId      String
-  teamAId      String
-  teamBId      String
-  round        Int
-  state        MatchState @default(PENDING)
+  id      String     @id @default(cuid())
+  lobbyId String
+  teamAId String
+  teamBId String
+  round   Int
+  state   MatchState @default(PENDING)
 
-  draftRoomId  String?
-  blueUrl      String?
-  redUrl       String?
-  specUrl      String?
+  draftRoomId String?
+  blueUrl     String?
+  redUrl      String?
+  specUrl     String?
 
-  announcedAt  DateTime?  // idempotence guard
+  announcedAt DateTime?
 
   winnerTeamId String?
-  winner       Team?      @relation("WinnerTeam", fields: [winnerTeamId], references: [id])
+  winner       Team?   @relation("WinnerTeam", fields: [winnerTeamId], references: [id])
 
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  lobby  Lobby @relation(fields: [lobbyId], references: [id])
-  teamA  Team  @relation("TeamA", fields: [teamAId], references: [id])
-  teamB  Team  @relation("TeamB", fields: [teamBId], references: [id])
+  lobby Lobby @relation(fields: [lobbyId], references: [id])
+  teamA Team  @relation("TeamA", fields: [teamAId], references: [id])
+  teamB Team  @relation("TeamB", fields: [teamBId], references: [id])
 
   result MatchResult?
 
+  @@unique([lobbyId, round, teamAId, teamBId])
   @@index([lobbyId, round])
   @@index([lobbyId, round, state])
-  @@unique([lobbyId, round, teamAId, teamBId])
 }
 
 model MatchResult {
@@ -194,7 +293,9 @@ model PointsLedger {
   @@index([matchId])
 }
 
-// ===== Modèles "site" (peuvent rester ici sans gêner le bot)
+/**
+ * ===================== Modèles "site" (inchangés) =====================
+ */
 model FaqItem {
   id        String   @id @default(cuid())
   order     Int      @default(0)
@@ -216,4 +317,298 @@ model InhouseEvent {
   updatedAt   DateTime @updatedAt
 
   @@index([startAt])
+}
+
+/**
+ * ===================== TITRES =====================
+ */
+model Title {
+  id            Int      @id @default(autoincrement())
+  name          String
+  description   String?
+  rarity        String?
+  price         Int
+  tradeable     Boolean  @default(false)
+  factionLockId Int?
+  factionLock   Faction? @relation(fields: [factionLockId], references: [id])
+
+  users      UserTitle[]
+  equippedBy UserProfile[] @relation("ActiveTitle")
+  listings   Listing[]
+}
+
+model UserTitle {
+  id         Int      @id @default(autoincrement())
+  userId     String
+  titleId    Int
+  acquiredAt DateTime @default(now())
+
+  title Title       @relation(fields: [titleId], references: [id])
+  user  UserProfile @relation(fields: [userId], references: [discordId])
+
+  @@unique([userId, titleId])
+  @@index([userId])
+  @@index([titleId])
+}
+
+/**
+ * ===================== SHOP / CONSOMMABLES / QUOTAS =====================
+ */
+model ShopItem {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  type        ShopType
+  price       Int
+
+  purchases Purchase[]
+}
+
+model Purchase {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  itemId    Int
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+
+  item ShopItem    @relation(fields: [itemId], references: [id])
+  user UserProfile @relation(fields: [userId], references: [discordId])
+
+  @@index([userId])
+  @@index([itemId])
+}
+
+model ConsumableStock {
+  id        Int            @id @default(autoincrement())
+  userId    String
+  type      ConsumableType
+  quantity  Int            @default(0)
+  updatedAt DateTime       @updatedAt
+
+  user UserProfile @relation(fields: [userId], references: [discordId])
+
+  @@unique([userId, type])
+  @@index([userId])
+}
+
+model UserQuota {
+  id          Int       @id @default(autoincrement())
+  userId      String
+  type        QuotaType
+  count       Int       @default(0)
+  windowStart DateTime
+
+  user UserProfile @relation(fields: [userId], references: [discordId])
+
+  @@unique([userId, type, windowStart])
+  @@index([userId])
+  @@index([type])
+}
+
+/**
+ * ===================== FACTIONS =====================
+ */
+model Faction {
+  id          Int     @id @default(autoincrement())
+  name        String
+  colorHex    String
+  emblemUrl   String?
+  totalPoints Int     @default(0)
+
+  members     UserProfile[]
+  badges      FactionBadge[]
+  challengesA FactionChallenge[] @relation("FactionChallenger")
+  challengesB FactionChallenge[] @relation("FactionOpponent")
+  offerings   FactionOffering[]
+  chests      FactionChest[]
+
+  titlesLocked Title[]
+
+  // Offres de transfert
+  offersAsFrom FactionTransferOffer[] @relation("OfferFromFaction")
+  offersAsTo   FactionTransferOffer[] @relation("OfferToFaction")
+
+  // État de faction (one-to-one)
+  state FactionState?
+
+  @@index([name])
+  @@index([totalPoints])
+}
+
+model FactionBadge {
+  id         Int              @id @default(autoincrement())
+  userId     String
+  factionId  Int
+  type       FactionBadgeType
+  acquiredAt DateTime         @default(now())
+
+  user    UserProfile @relation(fields: [userId], references: [discordId])
+  faction Faction     @relation(fields: [factionId], references: [id])
+
+  @@unique([userId, factionId, type])
+  @@index([userId])
+  @@index([factionId])
+}
+
+model FactionChallenge {
+  id                  Int             @id @default(autoincrement())
+  challengerFactionId Int
+  opponentFactionId   Int
+  createdBy           String
+  approvedBy          String?
+  scheduledAt         DateTime?
+  status              ChallengeStatus @default(PENDING)
+  createdAt           DateTime        @default(now())
+
+  challenger Faction @relation("FactionChallenger", fields: [challengerFactionId], references: [id])
+  opponent   Faction @relation("FactionOpponent", fields: [opponentFactionId], references: [id])
+
+  @@index([challengerFactionId])
+  @@index([opponentFactionId])
+  @@index([status])
+}
+
+model FactionOffering {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  factionId Int
+  amount    Int
+  createdAt DateTime @default(now())
+
+  user    UserProfile @relation(fields: [userId], references: [discordId])
+  faction Faction     @relation(fields: [factionId], references: [id])
+
+  @@index([userId])
+  @@index([factionId])
+}
+
+model FactionChest {
+  id          Int       @id @default(autoincrement())
+  factionId   Int
+  season      String?
+  openedAt    DateTime?
+  rewardsJson Json?
+
+  faction Faction @relation(fields: [factionId], references: [id])
+
+  @@index([factionId])
+}
+
+/**
+ * ✅ État de progression des factions (niveau & progression + compteurs)
+ * One-to-one par faction
+ */
+model FactionState {
+  factionId Int     @id
+  faction   Faction @relation(fields: [factionId], references: [id], onDelete: Cascade)
+
+  level    Int @default(1)
+  progress Int @default(0)
+
+  // Nouveaux compteurs
+  discountPct     Int @default(0)
+  duelTickets     Int @default(0)
+  championTickets Int @default(0)
+
+  championReserved String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/**
+ * ===================== Offres de transfert de faction =====================
+ */
+model FactionTransferOffer {
+  id            String      @id @default(cuid())
+  fromUserId    String
+  targetUserId  String
+  fromFactionId Int
+  toFactionId   Int
+  status        OfferStatus @default(PENDING)
+  createdAt     DateTime    @default(now())
+  expiresAt     DateTime
+  decidedAt     DateTime?
+
+  fromFaction Faction @relation("OfferFromFaction", fields: [fromFactionId], references: [id])
+  toFaction   Faction @relation("OfferToFaction", fields: [toFactionId], references: [id])
+
+  @@index([status, expiresAt])
+  @@index([targetUserId, status])
+}
+
+/**
+ * ===================== COMMUNITY SHOP (Auction House) =====================
+ */
+model Listing {
+  id             Int             @id @default(autoincrement())
+  sellerId       String
+  itemType       ListingType
+  titleId        Int?
+  consumableType ConsumableType?
+  price          Int
+  status         ListingStatus   @default(ACTIVE)
+  createdAt      DateTime        @default(now())
+  expiresAt      DateTime
+
+  seller UserProfile @relation("ListingsBySeller", fields: [sellerId], references: [discordId])
+  title  Title?      @relation(fields: [titleId], references: [id])
+  trades Trade[]
+
+  @@index([sellerId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model Trade {
+  id        Int      @id @default(autoincrement())
+  listingId Int
+  buyerId   String
+  price     Int
+  fee       Int
+  createdAt DateTime @default(now())
+
+  listing Listing     @relation(fields: [listingId], references: [id])
+  buyer   UserProfile @relation("TradesByBuyer", fields: [buyerId], references: [discordId])
+
+  @@index([buyerId])
+  @@index([listingId])
+}
+
+/**
+ * ===================== Dev/test overrides =====================
+ */
+model DevOverride {
+  userId         String   @id
+  infinitePoints Boolean  @default(false)
+  updatedAt      DateTime @updatedAt
+
+  user UserProfile @relation(fields: [userId], references: [discordId])
+}
+
+model BattleMatch {
+  id        String   @id @default(cuid())
+  lobbyId   String
+  round     Int
+  aId       String
+  bId       String
+  winnerId  String?
+  isFinal   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lobby Lobby @relation(fields: [lobbyId], references: [id])
+
+  @@index([lobbyId, round])
+  @@index([lobbyId, isFinal])
+}
+
+model PendingEffect {
+  id         String    @id @default(cuid())
+  userId     String
+  type       String
+  createdAt  DateTime  @default(now())
+  consumedAt DateTime?
+
+  @@index([userId, type, consumedAt])
 }

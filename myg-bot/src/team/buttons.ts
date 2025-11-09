@@ -5,7 +5,7 @@ import {
   ActionRowBuilder,
   GuildMember,
 } from "discord.js";
-import { prisma } from "../prisma";
+import { prisma } from "../prismat";
 import { env } from "../env";
 import { renderTeamBuilder } from "./render";
 import {
@@ -18,6 +18,7 @@ import { generateSchedule } from "./schedule";
 import { sendLineup } from "./lineup";
 import { createTeamCategories } from "./channels";
 import { startRound } from "../match/flow";
+import { launchTeamBuilder } from "./builder";
 
 function isRespoOrCreator(member: GuildMember | null, lobbyCreatorId: string): boolean {
   if (!member) return false;
@@ -28,6 +29,16 @@ function isRespoOrCreator(member: GuildMember | null, lobbyCreatorId: string): b
 export async function handleTeamButton(inter: ButtonInteraction) {
   const id = inter.customId; // TB:...
   if (!id.startsWith("TB:")) return;
+
+  // TB:OPEN:<lobbyId> — ouvrir Team Builder
+  if (id.startsWith("TB:OPEN:")) {
+    await inter.deferUpdate().catch(() => {});
+    const lobbyId = id.split(":")[2];
+    // Le builder attend un ChatInputCommandInteraction : on caste proprement,
+    // la fonction n'utilise que guild/client/reply sur l'interaction.
+    await launchTeamBuilder(lobbyId, inter as any);
+    return;
+  }
 
   // TB:NAME:<lobbyId>
   if (id.startsWith("TB:NAME:") && id.split(":").length === 3) {
@@ -111,7 +122,7 @@ export async function handleTeamButton(inter: ButtonInteraction) {
     return;
   }
 
-  // TB:VALIDATE:<lobbyId>  (✅ RESPO ONLY)
+  // TB:VALIDATE:<lobbyId> — inchangé
   if (id.startsWith("TB:VALIDATE:")) {
     await inter.deferUpdate();
     const lobbyId = id.split(":")[2];
@@ -131,7 +142,6 @@ export async function handleTeamButton(inter: ButtonInteraction) {
       return;
     }
 
-    // Check équipes complètes
     const roles = ["TOP", "JGL", "MID", "ADC", "SUPP"] as const;
     const incomplete = lobby.teamsList.find(t =>
       roles.some(r => !t.members.find(m => m.participant.role === r))
@@ -141,15 +151,12 @@ export async function handleTeamButton(inter: ButtonInteraction) {
       return;
     }
 
-    // Évite doublons
     const already = await prisma.match.findFirst({ where: { lobbyId }, select: { id: true } });
     if (already) {
       await inter.followUp({ content: "⚠️ Des matchs existent déjà pour ce lobby.", ephemeral: true });
       return;
     }
 
-    // ✅ Génère le planning en respectant le format choisi
-    // Fallback si non défini : 2 équipes -> BO1 ; 4 équipes -> RR1
     const fmt = (lobby.format as any) ?? (lobby.teams === 2 ? "BO1" : "RR1");
     const schedule = generateSchedule(
       lobby.teamsList.map(t => ({ id: t.id, name: t.name })), // TeamLike
@@ -168,11 +175,9 @@ export async function handleTeamButton(inter: ButtonInteraction) {
       });
     }
 
-    // Line-up + catégories/chan d'équipes
     await sendLineup(inter, lobbyId);
     await createTeamCategories(inter, lobbyId);
 
-    // 🚀 Démarre le **premier round** tout de suite (liens + embed dans #match)
     if (inter.guild) {
       await startRound(inter.guild, lobbyId, 1);
     }

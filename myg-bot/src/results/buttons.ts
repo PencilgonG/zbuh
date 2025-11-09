@@ -1,6 +1,8 @@
+// src/results/buttons.ts
 import { ButtonInteraction, GuildMember, TextChannel } from "discord.js";
-import { prisma } from "../prisma";
+import { prisma } from "../prismat";
 import { env } from "../env";
+import { applyContribution } from "../services/faction/contributions";
 
 function isRespoOrCreator(member: GuildMember | null, lobbyCreatorId: string): boolean {
   if (!member) return false;
@@ -62,7 +64,69 @@ export async function handleResultButton(inter: ButtonInteraction) {
       return;
     }
 
-    // Points + MatchResult
+    // ===== Double points — préparer la liste des utilisateurs concernés sur CE lobby =====
+    // On marque le lobby comme "double appliqué" via un entry PointsLedger 0pt pour éviter double application (MVP).
+    const allDiscordIds = new Set<string>();
+    for (const t of lobby.teamsList) {
+      for (const m of t.members) if (m.participant.discordId) allDiscordIds.add(m.participant.discordId);
+    }
+    const ids = Array.from(allDiscordIds);
+
+    // Cherche tokens non consommés
+    const pendingDouble = ids.length
+      ? await prisma.pendingEffect.findMany({
+          where: { userId: { in: ids }, type: "DOUBLE_POINTS_TOKEN", consumedAt: null },
+          select: { id: true, userId: true },
+        })
+      : [];
+
+    const alreadyMarked = ids.length
+      ? await prisma.pointsLedger.findMany({
+          where: {
+            discordId: { in: ids },
+            reason: `double_points_applied:${lobbyId}`,
+          },
+          select: { discordId: true },
+        })
+      : [];
+    const alreadySet = new Set(alreadyMarked.map((r) => r.discordId));
+
+    // Users à doubler pour CE lobby (soit possèdent token non consommé, soit déjà marqué par MVP)
+    const alsoMarkedByMvp = ids.length
+      ? await prisma.pointsLedger.findMany({
+          where: {
+            discordId: { in: ids },
+            reason: `double_points_applied:${lobbyId}`,
+          },
+          select: { discordId: true },
+        })
+      : [];
+    for (const r of alsoMarkedByMvp) alreadySet.add(r.discordId);
+
+    const toDouble = new Set<string>([...pendingDouble.map((p) => p.userId), ...alreadySet]);
+
+    // Consommer les tokens et poser le marqueur si pas déjà marqué
+    await prisma.$transaction(async (tx) => {
+      // Consommer tous les tokens non consommés
+      await tx.pendingEffect.updateMany({
+        where: { id: { in: pendingDouble.map((p) => p.id) } },
+        data: { consumedAt: new Date() },
+      });
+
+      // Marqueurs
+      for (const userId of toDouble) {
+        const exists = await tx.pointsLedger.findFirst({
+          where: { discordId: userId, reason: `double_points_applied:${lobbyId}` },
+        });
+        if (!exists) {
+          await tx.pointsLedger.create({
+            data: { discordId: userId, matchId: lobby.matches[0].id, points: 0, reason: `double_points_applied:${lobbyId}` },
+          });
+        }
+      }
+    });
+
+    // Points + MatchResult (+ contribution de faction), en doublant si nécessaire
     for (const m of lobby.matches) {
       const winnerId = m.winnerTeamId!;
       const loserId = m.teamAId === winnerId ? m.teamBId : m.teamAId;
@@ -73,17 +137,25 @@ export async function handleResultButton(inter: ButtonInteraction) {
       for (const mem of winner.members) {
         const did = mem.participant.discordId;
         if (did) {
+          const base = 3;
+          const factor = toDouble.has(did) ? 2 : 1;
+          const pts = base * factor;
           await prisma.pointsLedger.create({
-            data: { discordId: did, matchId: m.id, points: 3, reason: "win" },
+            data: { discordId: did, matchId: m.id, points: pts, reason: "win" },
           });
+          await applyContribution(did, pts);
         }
       }
       for (const mem of loser.members) {
         const did = mem.participant.discordId;
         if (did) {
+          const base = 1;
+          const factor = toDouble.has(did) ? 2 : 1;
+          const pts = base * factor;
           await prisma.pointsLedger.create({
-            data: { discordId: did, matchId: m.id, points: 1, reason: "loss" },
+            data: { discordId: did, matchId: m.id, points: pts, reason: "loss" },
           });
+          await applyContribution(did, pts);
         }
       }
 
@@ -108,7 +180,7 @@ export async function handleResultButton(inter: ButtonInteraction) {
         for (const [, msg] of msgs) {
           if (msg.author?.id !== inter.client.user?.id) continue;
           const hasResultControls = (msg.components ?? []).some((row) =>
-            row.components.some((c) => "customId" in c && typeof c.customId === "string" && c.customId.startsWith("RESULT:"))
+            row.components.some((c) => "customId" in c && typeof c.customId === "string" && c.customId.startsWith("RESULT:")),
           );
           if (hasResultControls) {
             await msg.delete().catch(() => {});
@@ -118,7 +190,7 @@ export async function handleResultButton(inter: ButtonInteraction) {
     }
 
     await inter.followUp({
-      content: "✅ Résultats validés, points enregistrés et panneau supprimé.",
+      content: "✅ Résultats validés, points enregistrés (avec doubles si applicable) et panneau supprimé.",
       ephemeral: true,
     });
     return;

@@ -1,8 +1,8 @@
-import { prisma, } from "../prisma";
+import { prisma } from "../prismat";
 
-export function roleCap(teams: number, role: "TOP"|"JGL"|"MID"|"ADC"|"SUPP"|"SUB") {
+export function roleCap(teams: number, role: "TOP" | "JGL" | "MID" | "ADC" | "SUPP" | "SUB") {
   if (role === "SUB") return Number.MAX_SAFE_INTEGER;
-  return teams === 4 ? 4 : 2;
+  return teams === 4 ? 4 : 2; // 2 équipes => cap 2 ; 4 équipes => cap 4
 }
 
 export async function countByRole(lobbyId: string) {
