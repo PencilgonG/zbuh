@@ -37,5 +37,6 @@ COPY --from=build /app/package.json ./package.json
 ENV NODE_ENV=production \
     TZ=Europe/Paris
 
+EXPOSE 8000
 # Lancer le bot
 CMD ["node", "dist/index.js"]
