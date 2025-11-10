@@ -1,52 +1,40 @@
 # syntax=docker/dockerfile:1
 
-########################
-#  Build stage
-########################
+# ---- Build stage ----
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
-# Dépendances utiles (Prisma/OpenSSL) + certifs
+# Minimal certificates (useful if you ever fetch over HTTPS during build)
 RUN apt-get update -y \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
   && rm -rf /var/lib/apt/lists/*
 
-# ⚠️ Le contexte Docker = racine du repo.
-# On COPIE donc les fichiers du dossier myg-bot/ explicitement.
-COPY myg-bot/package.json myg-bot/package-lock.json* myg-bot/pnpm-lock.yaml* myg-bot/yarn.lock* myg-bot/.npmrc* ./ 2>/dev/null || true
+# Copy manifests (no shell tricks here)
+COPY myg-bot/package.json ./package.json
+# If you use package-lock.json, keep the next line; otherwise it’s harmless.
+COPY myg-bot/package-lock.json ./package-lock.json
 
-# Installer deps prod+dev (tsc etc.)
-RUN npm ci
+# Install deps (use npm ci when lockfile is present)
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-# Code source du bot
+# Bring the whole app
 COPY myg-bot/ ./
 
-# Prisma (si présent)
-RUN if [ -f prisma/schema.prisma ]; then \
-      npx prisma generate --schema prisma/schema.prisma; \
-    else \
-      echo "No Prisma schema found (ok if not using Prisma)."; \
-    fi
+# Prisma generation is optional
+RUN npx prisma generate || echo "No Prisma schema found (ok if not using Prisma)."
 
-# Build TypeScript -> dist/
+# Build TS -> dist/
 RUN npm run build
 
-########################
-#  Runtime stage
-########################
-FROM node:22-bookworm-slim AS runner
+# ---- Runtime stage ----
+FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Node_modules (prod) + build
+# Only what we need at runtime
+COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-# Prisma client (si généré)
-COPY --from=build /app/prisma ./prisma 2>/dev/null || true
-# Garder package.json (utile pour quelques libs)
-COPY myg-bot/package.json ./package.json
 
-# Koyeb veut un port exposé même si le bot n'écoute pas HTTP
-EXPOSE 8000
-
+# Discord bot: no HTTP port to expose, just run the bot.
 CMD ["node", "dist/index.js"]
