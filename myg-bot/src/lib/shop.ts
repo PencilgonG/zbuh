@@ -45,7 +45,6 @@ export async function chargePoints(
       discordId: userId,
       points: -Math.abs(amount),
       reason,
-      // @ts-expect-error: ton schéma a matchId obligatoire -> on le renseigne
       matchId: SHOP_MATCH_ID,
     } as any,
   });
@@ -58,7 +57,6 @@ export async function addPoints(userId: string, amount: number, reason: string) 
       discordId: userId,
       points: Math.abs(amount),
       reason,
-      // @ts-expect-error: cf. ci-dessus
       matchId: SHOP_MATCH_ID,
     } as any,
   });
@@ -121,7 +119,6 @@ export async function checkAndIncrementQuota(
       discordId: userId,
       points: 0,
       reason: `${quotaMarker}${tag ? ` ${tag}` : ""}`,
-      // @ts-expect-error: cf. plus haut
       matchId: SHOP_MATCH_ID,
     } as any,
   });
@@ -145,7 +142,6 @@ export async function addConsumable(
       discordId: userId,
       points: 0,
       reason: `[CONSUMABLE:${type}] +${qty}`,
-      // @ts-expect-error
       matchId: SHOP_MATCH_ID,
     } as any,
   });
