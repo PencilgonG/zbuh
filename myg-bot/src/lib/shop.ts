@@ -1,64 +1,96 @@
-import { prisma } from "../prismat";  // <- sans .js
-import { ConsumableType, QuotaType } from "@prisma/client";
+// src/lib/shop.ts
+import { prisma } from "../prismat";
+import type { ConsumableType, QuotaType } from "@prisma/client";
 
-export async function getUserPoints(discordId: string) {
-  const agg = await prisma.pointsLedger.aggregate({ _sum: { points: true }, where: { discordId } });
+/** Solde courant (somme de PointsLedger). */
+export async function getBalance(userId: string): Promise<number> {
+  const agg = await prisma.pointsLedger.aggregate({
+    where: { discordId: userId },
+    _sum: { points: true },
+  });
   return agg._sum.points ?? 0;
 }
 
-export async function hasInfinite(discordId: string) {
-  const o = await prisma.devOverride.findUnique({ where: { userId: discordId } });
-  return !!o?.infinitePoints;
+/** Lève une erreur si le solde est insuffisant. */
+export async function assertSufficientBalance(userId: string, cost: number) {
+  const bal = await getBalance(userId);
+  if (bal < cost) {
+    const msg = `⛔ Solde insuffisant: ${bal} pts (prix = ${cost} pts).`;
+    const err = new Error(msg);
+    // @ts-ignore
+    err.code = "INSUFFICIENT_POINTS";
+    throw err;
+  }
 }
 
-export async function chargePoints(discordId: string, amount: number, reason: string) {
-  if (amount <= 0) return;
-  const infinite = await hasInfinite(discordId);
-  if (infinite) {
-    await prisma.pointsLedger.create({
-      data: { discordId, matchId: "DEV", points: 0, reason: `DEV_OVERRIDE:${reason}` }
-    });
-    return;
-  }
-  const balance = await getUserPoints(discordId);
-  if (balance < amount) throw new Error(`Solde insuffisant: ${balance} < ${amount}`);
-  await prisma.pointsLedger.create({ data: { discordId, matchId: "SHOP", points: -amount, reason } });
-}
+/**
+ * Débite des points (enregistre une ligne négative si nécessaire).
+ * Utilise un tx si tu veux enchaîner plusieurs écritures atomiques
+ * depuis l’appelant.
+ */
+export async function chargePoints(
+  userId: string,
+  amount: number, // coût positif (ex: 50)
+  reason: string,
+) {
+  // Vérif stricte avant débit
+  await assertSufficientBalance(userId, amount);
 
-export function currentWindowStart(type: QuotaType): Date {
-  const d = new Date();
-  if (type === "FACTION_TRANSFER_MONTHLY") {
-    d.setUTCDate(1);
-    d.setUTCHours(0, 0, 0, 0);
-  } else {
-    const day = d.getUTCDay();
-    const diffToMon = (day + 6) % 7;
-    d.setUTCDate(d.getUTCDate() - diffToMon);
-    d.setUTCHours(0, 0, 0, 0);
-  }
-  return d;
-}
-
-export async function checkAndIncrementQuota(discordId: string, type: QuotaType, cap: number) {
-  const windowStart = currentWindowStart(type);
-  const key = { userId: discordId, type, windowStart };
-  const q = await prisma.userQuota.findUnique({ where: { userId_type_windowStart: key } });
-  if (!q) {
-    await prisma.userQuota.create({ data: { ...key, count: 1 } });
-    return { ok: true, remaining: cap - 1 };
-  }
-  if (q.count >= cap) return { ok: false, remaining: 0 };
-  await prisma.userQuota.update({
-    where: { userId_type_windowStart: key },
-    data: { count: { increment: 1 } }
+  await prisma.pointsLedger.create({
+    data: {
+      discordId: userId,
+      points: -Math.abs(amount), // débit
+      reason,
+    },
   });
-  return { ok: true, remaining: cap - (q.count + 1) };
 }
 
-export async function addConsumable(discordId: string, type: ConsumableType, qty = 1) {
-  await prisma.consumableStock.upsert({
-    where: { userId_type: { userId: discordId, type } },
-    update: { quantity: { increment: qty } },
-    create: { userId: discordId, type, quantity: qty }
+/** Crédite des points (utile pour debug ou récompenses). */
+export async function addPoints(userId: string, amount: number, reason: string) {
+  await prisma.pointsLedger.create({
+    data: { discordId: userId, points: Math.abs(amount), reason },
+  });
+}
+
+/** Quotas hebdo/mensuels : renvoie { ok, used, cap }. */
+export async function checkAndIncrementQuota(
+  userId: string,
+  quota: QuotaType,
+  cap: number,
+): Promise<{ ok: boolean; used: number; cap: number }> {
+  const now = new Date();
+
+  // Fenêtre temporelle selon type de quota
+  let after = new Date(now);
+  if (quota.includes("WEEKLY")) {
+    after.setDate(after.getDate() - 7);
+  } else if (quota.includes("MONTHLY")) {
+    after.setMonth(after.getMonth() - 1);
+  } else {
+    after.setDate(after.getDate() - 7); // fallback weekly
+  }
+
+  const used = await prisma.quotaLog.count({
+    where: { discordId: userId, quota, createdAt: { gte: after } },
+  });
+  if (used >= cap) return { ok: false, used, cap };
+
+  await prisma.quotaLog.create({
+    data: { discordId: userId, quota },
+  });
+  return { ok: true, used: used + 1, cap };
+}
+
+/** Ajoute un consommable dans l’inventaire utilisateur. */
+export async function addConsumable(
+  userId: string,
+  type: ConsumableType,
+  qty = 1,
+) {
+  // upsert simple
+  await prisma.userConsumable.upsert({
+    where: { userId_type: { userId, type } },
+    create: { userId, type, qty },
+    update: { qty: { increment: qty } },
   });
 }
