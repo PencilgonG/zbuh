@@ -40,10 +40,22 @@ import {
 } from "./interactions/modals-faction";
 
 // Faction JOIN (nouveau flux select + bouton)
-import {
-  handleJoinSelect,
-  handleJoinSubmit,
-} from "./bot/commands/faction";
+import { handleJoinSelect, handleJoinSubmit } from "./bot/commands/faction";
+
+// ────────────────────────────────────────────────────────────
+// Anti-doublon d’interactions (idempotency, TTL simple 60s)
+// ────────────────────────────────────────────────────────────
+const seenInteractions = new Map<string, number>();
+function alreadyHandled(interactionId: string, ttlMs = 60_000): boolean {
+  const now = Date.now();
+  // purge basique
+  for (const [id, t] of seenInteractions) {
+    if (now - t > ttlMs) seenInteractions.delete(id);
+  }
+  if (seenInteractions.has(interactionId)) return true;
+  seenInteractions.set(interactionId, now);
+  return false;
+}
 
 const client = new Client({
   intents: [
@@ -54,10 +66,15 @@ const client = new Client({
 });
 
 client.once("ready", () => {
-  log.info({ user: client.user?.tag }, "Bot prêt ✅");
+  // Log l’instance Koyeb si dispo pour diagnostiquer les multi-process
+  const instance = process.env.KOYEB_INSTANCE_ID || process.env.HOSTNAME || "local";
+  log.info({ user: client.user?.tag, instance }, "Bot prêt ✅");
 });
 
 client.on("interactionCreate", async (interaction: Interaction) => {
+  // 🚫 Ignore immédiatement un doublon potentiel
+  if (alreadyHandled(interaction.id)) return;
+
   try {
     // ===== Slash =====
     if (interaction.isChatInputCommand()) {
