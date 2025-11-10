@@ -1,4 +1,3 @@
-// src/env.ts
 import "dotenv/config";
 import { z } from "zod";
 
@@ -26,8 +25,14 @@ const Env = z.object({
   DUELS_CHANNEL_ID: z.string().min(1),
 
   // requis historiquement par mygEmbedBase
-  LOGO_URL: z.string().url(),
-  BANNER_URL: z.string().url(),
+  LOGO_URL: z
+    .string()
+    .url()
+    .default("https://i.imgur.com/5jeFZRK.png"), // ✅ ton logo
+  BANNER_URL: z
+    .string()
+    .url()
+    .default("https://i.imgur.com/HfRoVgQ.png"), // ✅ ta bannière
 
   // bannières par faction (optionnelles)
   BANNER_DEMACIA: z.string().url().optional(),
