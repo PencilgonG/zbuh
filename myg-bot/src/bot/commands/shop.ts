@@ -8,7 +8,8 @@ import {
   StringSelectMenuBuilder,
 } from "discord.js";
 import { prisma } from "../../prismat";
-import { chargePoints, checkAndIncrementQuota, addConsumable } from "../../lib/shop";
+import { log } from "../../log";
+import { chargePoints, checkAndIncrementQuota, addConsumable, getBalance } from "../../lib/shop";
 import {
   ConsumableType,
   QuotaType,
@@ -17,6 +18,35 @@ import {
   type ShopItem as ShopItemModel,
 } from "@prisma/client";
 
+// =========================
+// Helpers
+// =========================
+
+async function ephemeralReply(
+  inter: ChatInputCommandInteraction | StringSelectMenuInteraction,
+  payload: Parameters<ChatInputCommandInteraction["reply"]>[0],
+) {
+  try {
+    if ("deferred" in inter && inter.deferred) {
+      return await inter.editReply(payload);
+    }
+    if ("replied" in inter && inter.replied) {
+      return await inter.followUp({ ...(payload as any), ephemeral: true });
+    }
+    return await inter.reply({ ...(payload as any), ephemeral: true });
+  } catch {
+    // dernier recours
+    try {
+      return await inter.followUp({ ...(payload as any), ephemeral: true });
+    } catch {
+      return;
+    }
+  }
+}
+
+// =========================
+// Slash builder
+// =========================
 export const data = new SlashCommandBuilder()
   .setName("shop")
   .setDescription("Boutique MYG : titres & consommables")
@@ -98,6 +128,10 @@ function mapConsumableTypeByName(name: string): ConsumableType | null {
   return null;
 }
 
+// =========================
+// Command handler
+// =========================
+
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand(false) ?? null;
   const group = interaction.options.getSubcommandGroup(false) ?? null;
@@ -127,13 +161,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const titleId = interaction.options.getInteger("title_id", false);
     if (titleId == null) {
       const rows = await buildTitleSelectorRow("SHOP:BUY:TITLE", buyerId);
-      if (!rows.length)
-        return interaction.reply({ content: "Aucun titre disponible.", ephemeral: true });
+      if (!rows.length) return interaction.reply({ content: "Aucun titre disponible.", ephemeral: true });
       const embed = new EmbedBuilder()
         .setTitle("🏷️ Choisir un titre")
         .setDescription("Sélectionne un **titre** à acheter (prix après réduc affiché).");
       return interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
     }
+    await interaction.deferReply({ ephemeral: true });
     return buyTitle(interaction, buyerId, titleId);
   }
 
@@ -149,6 +183,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         .setDescription("Sélectionne un **consommable** à acheter (prix après réduc affiché).");
       return interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
     }
+    await interaction.deferReply({ ephemeral: true });
     return buyConsumable(interaction, buyerId, itemId);
   }
 
@@ -157,17 +192,29 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
 export async function handleShopSelect(inter: StringSelectMenuInteraction) {
   const buyerId = inter.user.id;
-  if (inter.customId === "SHOP:TITLE" || inter.customId === "SHOP:BUY:TITLE") {
-    const titleId = Number(inter.values[0]);
-    return buyTitle(inter, buyerId, titleId);
-  }
-  if (inter.customId === "SHOP:CONS" || inter.customId === "SHOP:BUY:CONS") {
-    const itemId = Number(inter.values[0]);
-    return buyConsumable(inter, buyerId, itemId);
+  try {
+    // Accuser réception tout de suite pour éviter timeouts “Unknown interaction”
+    await inter.deferReply({ ephemeral: true });
+
+    if (inter.customId === "SHOP:TITLE" || inter.customId === "SHOP:BUY:TITLE") {
+      const titleId = Number(inter.values[0]);
+      return buyTitle(inter, buyerId, titleId);
+    }
+    if (inter.customId === "SHOP:CONS" || inter.customId === "SHOP:BUY:CONS") {
+      const itemId = Number(inter.values[0]);
+      return buyConsumable(inter, buyerId, itemId);
+    }
+
+    return ephemeralReply(inter, { content: "Sélecteur inconnu." });
+  } catch (err) {
+    log.error({ err }, "handleShopSelect failed");
+    return ephemeralReply(inter, { content: "❌ Erreur d’interaction. Réessaie." });
   }
 }
 
-// ===== UI builders (avec prix après réduction)
+// =========================
+// UI builders (prix après réduction)
+// =========================
 async function buildListSelectorsRows(userId: string) {
   const pct = await getFactionDiscountPct(userId);
   const [titles, consumables] = await Promise.all([
@@ -260,47 +307,61 @@ async function buildConsumableSelectorRow(customId: string, userId: string) {
     : [];
 }
 
-// ===== achats (appliquent la réduction)
+// =========================
+// Achats (avec garde de solde + erreurs propres)
+// =========================
 async function buyTitle(
   inter: ChatInputCommandInteraction | StringSelectMenuInteraction,
   buyerId: string,
   titleId: number,
 ) {
-  const title = await prisma.title.findUnique({ where: { id: titleId } });
-  if (!title) return inter.reply({ content: "❌ Titre introuvable.", ephemeral: true });
+  try {
+    const title = await prisma.title.findUnique({ where: { id: titleId } });
+    if (!title) return ephemeralReply(inter, { content: "❌ Titre introuvable." });
 
-  if (title.factionLockId) {
-    const me = await prisma.userProfile.findUnique({
-      where: { discordId: buyerId },
-      select: { factionId: true },
-    });
-    if (!me?.factionId || me.factionId !== title.factionLockId) {
-      return inter.reply({
-        content: "⛔ Titre **verrouillé par faction**. Rejoins d'abord la faction correspondante.",
-        ephemeral: true,
+    if (title.factionLockId) {
+      const me = await prisma.userProfile.findUnique({
+        where: { discordId: buyerId },
+        select: { factionId: true },
+      });
+      if (!me?.factionId || me.factionId !== title.factionLockId) {
+        return ephemeralReply(inter, {
+          content: "⛔ Titre **verrouillé par faction**. Rejoins d'abord la faction correspondante.",
+        });
+      }
+    }
+
+    const already = await prisma.userTitle.findFirst({ where: { userId: buyerId, titleId } });
+    if (already) return ephemeralReply(inter, { content: "ℹ️ Tu possèdes déjà ce titre." });
+
+    const pct = await getFactionDiscountPct(buyerId);
+    const priceToCharge = applyDiscount(title.price, pct);
+
+    const balance = await getBalance(buyerId);
+    if (balance < priceToCharge) {
+      return ephemeralReply(inter, {
+        content: `❌ Solde insuffisant: il faut **${priceToCharge} pts**, tu as **${balance} pts**.`,
       });
     }
+
+    await chargePoints(buyerId, priceToCharge, `BUY_TITLE:${title.name}`);
+    await prisma.userTitle.create({ data: { userId: buyerId, titleId } });
+
+    return ephemeralReply(inter, {
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("✅ Achat confirmé")
+          .setDescription(`Tu as acheté le **titre** : *${title.name}* pour **${priceToCharge} pts** (réduc ${pct}%).`),
+      ],
+    });
+  } catch (err: any) {
+    // P2002 = déjà possédé (conflit unique userId+titleId)
+    if (err?.code === "P2002") {
+      return ephemeralReply(inter, { content: "ℹ️ Tu possèdes déjà ce titre." });
+    }
+    log.error({ err }, "buyTitle failed");
+    return ephemeralReply(inter, { content: "❌ Erreur lors de l’achat du titre." });
   }
-
-  const already = await prisma.userTitle.findFirst({ where: { userId: buyerId, titleId } });
-  if (already) return inter.reply({ content: "ℹ️ Tu possèdes déjà ce titre.", ephemeral: true });
-
-  const pct = await getFactionDiscountPct(buyerId);
-  const priceToCharge = applyDiscount(title.price, pct);
-
-  await chargePoints(buyerId, priceToCharge, `BUY_TITLE:${title.name}`);
-  await prisma.userTitle.create({ data: { userId: buyerId, titleId } });
-
-  return inter.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle("✅ Achat confirmé")
-        .setDescription(
-          `Tu as acheté le **titre** : *${title.name}* pour **${priceToCharge} pts** (réduc ${pct}%).`,
-        ),
-    ],
-    ephemeral: true,
-  });
 }
 
 async function buyConsumable(
@@ -308,44 +369,54 @@ async function buyConsumable(
   buyerId: string,
   itemId: number,
 ) {
-  const item = await prisma.shopItem.findUnique({ where: { id: itemId } });
-  if (!item || item.type !== ShopType.CONSUMABLE) {
-    return inter.reply({ content: "❌ Cet ID n’est pas un **consommable**.", ephemeral: true });
-  }
+  try {
+    const item = await prisma.shopItem.findUnique({ where: { id: itemId } });
+    if (!item || item.type !== ShopType.CONSUMABLE) {
+      return ephemeralReply(inter, { content: "❌ Cet ID n’est pas un **consommable**." });
+    }
 
-  const cType = mapConsumableTypeByName(item.name);
-  if (!cType || !CONSUMABLE_RULES[cType]) {
-    return inter.reply({
-      content: "❌ Consommable non reconnu / non vendu (renomme l’item ou ajoute sa règle).",
-      ephemeral: true,
+    const cType = mapConsumableTypeByName(item.name);
+    if (!cType || !CONSUMABLE_RULES[cType]) {
+      return ephemeralReply(inter, {
+        content: "❌ Consommable non reconnu / non vendu (renomme l’item ou ajoute sa règle).",
+      });
+    }
+
+    const rule = CONSUMABLE_RULES[cType]!;
+
+    // Quota
+    const quota = await checkAndIncrementQuota(buyerId, rule.quota, rule.cap);
+    if (!quota.ok) {
+      const scope = rule.quota === "FACTION_TRANSFER_MONTHLY" ? "mois" : "semaine";
+      return ephemeralReply(inter, {
+        content: `⛔ Quota atteint pour **${rule.displayName}** (${rule.cap}/${scope}).`,
+      });
+    }
+
+    // Prix (après réduc)
+    const pct = await getFactionDiscountPct(buyerId);
+    const base = item.price ?? rule.price;
+    const priceToCharge = applyDiscount(base, pct);
+
+    const balance = await getBalance(buyerId);
+    if (balance < priceToCharge) {
+      return ephemeralReply(inter, {
+        content: `❌ Solde insuffisant: il faut **${priceToCharge} pts**, tu as **${balance} pts**.`,
+      });
+    }
+
+    await chargePoints(buyerId, priceToCharge, `BUY_CONSUMABLE:${rule.displayName}`);
+    await addConsumable(buyerId, cType, 1);
+
+    return ephemeralReply(inter, {
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("✅ Achat confirmé")
+          .setDescription(`Tu as acheté **${rule.displayName}** pour **${priceToCharge} pts** (réduc ${pct}%).`),
+      ],
     });
+  } catch (err) {
+    log.error({ err }, "buyConsumable failed");
+    return ephemeralReply(inter, { content: "❌ Erreur lors de l’achat du consommable." });
   }
-
-  const rule = CONSUMABLE_RULES[cType]!;
-  const quota = await checkAndIncrementQuota(buyerId, rule.quota, rule.cap);
-  if (!quota.ok) {
-    const scope = rule.quota === "FACTION_TRANSFER_MONTHLY" ? "mois" : "semaine";
-    return inter.reply({
-      content: `⛔ Quota atteint pour **${rule.displayName}** (${rule.cap}/${scope}).`,
-      ephemeral: true,
-    });
-  }
-
-  const pct = await getFactionDiscountPct(buyerId);
-  const base = item.price ?? rule.price;
-  const priceToCharge = applyDiscount(base, pct);
-
-  await chargePoints(buyerId, priceToCharge, `BUY_CONSUMABLE:${rule.displayName}`);
-  await addConsumable(buyerId, cType, 1);
-
-  return inter.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle("✅ Achat confirmé")
-        .setDescription(
-          `Tu as acheté **${rule.displayName}** pour **${priceToCharge} pts** (réduc ${pct}%).`,
-        ),
-    ],
-    ephemeral: true,
-  });
 }
