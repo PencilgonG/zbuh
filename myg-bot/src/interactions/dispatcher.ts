@@ -43,6 +43,9 @@ import { handleBrCreate } from "../battle/slash/create";
 import { handleInventory } from "../slash/inventory";
 import { handleTitleUse } from "../slash/title/use";
 
+// ✅ Nouveau : debug command
+import { execute as handleDebug } from "../slash/debug";
+
 // Factions: modals/boutons (+ duel flow)
 import {
   showFactionDonateModal,
@@ -120,6 +123,9 @@ export async function handleSlash(interaction: ChatInputCommandInteraction) {
     const sub = interaction.options.getSubcommand();
     if (sub === "use") return handleTitleUse(interaction);
   }
+
+  // ✅ Nouveau : /debug
+  if (name === "debug") return handleDebug(interaction);
 
   await interaction.reply({ content: "Commande inconnue.", ephemeral: true });
 }
