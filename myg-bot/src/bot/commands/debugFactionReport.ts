@@ -1,44 +1,39 @@
 // src/bot/commands/debugFactionReport.ts
 import {
-  SlashCommandBuilder,
-  type ChatInputCommandInteraction,
+  AttachmentBuilder,
+  ChatInputCommandInteraction,
 } from "discord.js";
 import { isAdminUser } from "../../lib/admin";
+import { renderMockFreljordReportPng } from "../../lib/factionReport";
 
-export const data = new SlashCommandBuilder()
-  .setName("debug")
-  .setDescription("Outils de debug (admin only)")
-  .addSubcommand((sub) =>
-    sub
-      .setName("faction-report")
-      .setDescription("Génère un rapport Freljord factice (debug)"),
-  );
-
-/**
- * Handler principal de /debug
- */
-export async function execute(interaction: ChatInputCommandInteraction) {
-  const sub = interaction.options.getSubcommand();
-
-  // ✅ Vérif admin par ID
+export async function debugFactionReport(
+  interaction: ChatInputCommandInteraction,
+) {
   if (!isAdminUser(interaction.user.id)) {
     return interaction.reply({
-      content: "⛔ Cette commande est réservée aux **admins** MYG.",
+      content: "⛔ Cette sous-commande est réservée aux admins debug.",
       ephemeral: true,
     });
   }
 
-  if (sub === "faction-report") {
-    // Pour l’instant : simple message de test
-    return interaction.reply({
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    const png = await renderMockFreljordReportPng();
+
+    const file = new AttachmentBuilder(png, {
+      name: "faction-freljord-report.png",
+    });
+
+    await interaction.editReply({
+      content: "🧊 Rapport Freljord (debug).",
+      files: [file],
+    });
+  } catch (err) {
+    console.error("debugFactionReport error:", err);
+    await interaction.editReply({
       content:
-        "✅ Debug OK : `/debug faction-report` est bien limité aux admins (squelette).",
-      ephemeral: true,
+        "❌ Impossible de générer l'image du rapport de faction (voir logs).",
     });
   }
-
-  return interaction.reply({
-    content: "Sous-commande inconnue.",
-    ephemeral: true,
-  });
 }

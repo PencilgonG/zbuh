@@ -1,0 +1,197 @@
+<!-- src/templates/factions/report.html -->
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Rapport de faction - {{faction.name}}</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: radial-gradient(circle at top, #111827, #020617);
+        color: #e5e7eb;
+      }
+
+      .wrapper {
+        width: 1280px;
+        height: 720px;
+        padding: 32px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .faction-name {
+        font-size: 40px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .badge {
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(15, 118, 110, 0.2);
+        border: 1px solid rgba(45, 212, 191, 0.5);
+        font-size: 13px;
+      }
+
+      .columns {
+        display: grid;
+        grid-template-columns: 1.4fr 1fr;
+        gap: 24px;
+        flex: 1;
+      }
+
+      .card {
+        background: linear-gradient(
+          135deg,
+          rgba(15, 23, 42, 0.95),
+          rgba(15, 23, 42, 0.7)
+        );
+        border-radius: 24px;
+        padding: 20px 24px;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        backdrop-filter: blur(10px);
+      }
+
+      .card h2 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .stat {
+        padding: 10px 12px;
+        border-radius: 16px;
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(51, 65, 85, 0.8);
+        font-size: 13px;
+      }
+
+      .stat-label {
+        color: #9ca3af;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 2px;
+      }
+
+      .stat-value {
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .players-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .player {
+        font-size: 13px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid rgba(55, 65, 81, 0.8);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      footer {
+        font-size: 11px;
+        color: #6b7280;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        opacity: 0.85;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrapper">
+      <header>
+        <div>
+          <div class="badge">MYG Inhouse – Faction</div>
+          <div class="faction-name">{{faction.name}}</div>
+          <div>Saison {{season.name}} • Semaine {{week.index}}</div>
+        </div>
+        <div class="card" style="width: 260px; text-align: right">
+          <div class="stat-label">Classement</div>
+          <div class="stat-value">#{{faction.rank}}</div>
+          <div style="font-size: 12px; color: #9ca3af">
+            {{faction.points}} pts • {{faction.winrate}}% WR
+          </div>
+        </div>
+      </header>
+
+      <div class="columns">
+        <section class="card">
+          <h2>📊 Statistiques</h2>
+          <div class="stats-grid">
+            <div class="stat">
+              <div class="stat-label">Points</div>
+              <div class="stat-value">{{faction.points}}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Matchs joués</div>
+              <div class="stat-value">{{faction.matchesPlayed}}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Winrate</div>
+              <div class="stat-value">{{faction.winrate}}%</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Joueurs actifs</div>
+              <div class="stat-value">{{faction.activePlayers}}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">MVP cumulés</div>
+              <div class="stat-value">{{faction.mvpCount}}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Ban +1 utilisés</div>
+              <div class="stat-value">{{faction.banPlusOneUsed}}</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>🏅 Top joueurs</h2>
+          <ul class="players-list">
+            {{topPlayers.0.name}}
+            <!-- le mini-engine ne gère pas les boucles, tu peux injecter
+                 une chaîne déjà formatée ou l'améliorer plus tard.
+            -->
+          </ul>
+        </section>
+      </div>
+
+      <footer>
+        <span>Généré par MYG Bot</span>
+        <span>{{generatedAt}}</span>
+      </footer>
+    </div>
+  </body>
+</html>
