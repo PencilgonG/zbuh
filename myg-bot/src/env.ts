@@ -14,7 +14,7 @@ const Env = z.object({
   RESULTS_CHANNEL_ID: z.string().min(1),
   VOTE_CHANNEL_ID: z.string().min(1),
 
-  // ➕ Nouveaux : rôles par région & salon des duels
+  // ➕ Rôles par région & salon des duels
   ROLE_DEMACIA_ID: z.string().min(1),
   ROLE_NOXUS_ID: z.string().min(1),
   ROLE_IONIA_ID: z.string().min(1),
@@ -28,11 +28,11 @@ const Env = z.object({
   LOGO_URL: z
     .string()
     .url()
-    .default("https://i.imgur.com/5jeFZRK.png"), // ✅ ton logo
+    .default("https://i.imgur.com/5jeFZRK.png"),
   BANNER_URL: z
     .string()
     .url()
-    .default("https://i.imgur.com/HfRoVgQ.png"), // ✅ ta bannière
+    .default("https://i.imgur.com/HfRoVgQ.png"),
 
   // bannières par faction (optionnelles)
   BANNER_DEMACIA: z.string().url().optional(),
@@ -42,12 +42,18 @@ const Env = z.object({
   BANNER_PILTOVER: z.string().url().optional(),
   BANNER_SHURIMA: z.string().url().optional(),
   BANNER_ZAUN: z.string().url().optional(),
+
+  // ➕ Nouvel env : User IDs admin
+  // Format : "123,456,789"
+  ADMIN_USER_IDS: z.string().optional(),
 });
 
 type EnvType = z.infer<typeof Env>;
 
 // on étend le type avec l'alias legacy RESULT_CHANNEL_ID
-export const env = Env.parse(process.env) as EnvType & { RESULT_CHANNEL_ID: string };
+export const env = Env.parse(process.env) as EnvType & {
+  RESULT_CHANNEL_ID: string;
+};
 
 Object.defineProperty(env, "RESULT_CHANNEL_ID", {
   get() {
